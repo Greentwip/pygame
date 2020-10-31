@@ -103,6 +103,11 @@ if get_sdl_version() < (2, 0, 0):
         import pygame.cdrom
     except (ImportError, IOError):
         cdrom = MissingModule("cdrom", urgent=1)
+else:
+    if os.environ.get('SDL_VIDEODRIVER') == 'windib':
+        # windib isn't in SDL2, we don't want it to fail.
+        environ['SDL_VIDEODRIVER'] = 'windows'
+
 
 try:
     import pygame.cursors
