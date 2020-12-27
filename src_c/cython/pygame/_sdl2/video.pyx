@@ -1,19 +1,8 @@
 from cpython cimport PyObject
-
-# cpython does not read from other modules relative to the current module
-#from . import error
-#from . import error as errorfnc
-
+from . import error
+from . import error as errorfnc
 from libc.stdlib cimport free, malloc
 
-# replacement
-class error(RuntimeError):
-    def __init__(self, message=None):
-        if message is None:
-            message = SDL_GetError().decode('utf8')
-        RuntimeError.__init__(self, message)
-
-errorfnc = error
 
 WINDOWPOS_UNDEFINED = _SDL_WINDOWPOS_UNDEFINED
 WINDOWPOS_CENTERED = _SDL_WINDOWPOS_CENTERED
@@ -33,6 +22,8 @@ cdef extern from "SDL.h" nogil:
     int SDL_SetWindowOpacity(SDL_Window *window, float opacity)
     int SDL_SetWindowModalFor(SDL_Window *modal_window, SDL_Window *parent_window)
     int SDL_SetWindowInputFocus(SDL_Window *window)
+    int SDL_SetRelativeMouseMode(SDL_bool enabled)
+    SDL_bool SDL_GetRelativeMouseMode()
     SDL_Renderer* SDL_GetRenderer(SDL_Window* window)
     SDL_Window* SDL_GetWindowFromID(Uint32 id)
     SDL_Surface * SDL_CreateRGBSurfaceWithFormat(Uint32 flags, int width, int height, int depth, Uint32 format)
@@ -311,6 +302,25 @@ cdef class Window:
     def grab(self, bint grabbed):
         # https://wiki.libsdl.org/SDL_SetWindowGrab
         SDL_SetWindowGrab(self._win, 1 if grabbed else 0)
+
+    @property
+    def relative_mouse(self):
+        """ Window's relative mouse motion state (``True`` or ``False``).
+
+        Set it to ``True`` to enable, ``False`` to disable.
+        If mouse.set_visible(True) is set the input will be grabbed,
+        and the mouse will enter endless relative motion mode.
+
+        :rtype: bool
+        """
+        return SDL_GetRelativeMouseMode()
+
+
+    @relative_mouse.setter
+    def relative_mouse(self, bint enable):
+        # https://wiki.libsdl.org/SDL_SetRelativeMouseMode
+        #SDL_SetWindowGrab(self._win, 1 if enable else 0)
+        SDL_SetRelativeMouseMode(1 if enable else 0)
 
     def set_windowed(self):
         """ Enable windowed mode

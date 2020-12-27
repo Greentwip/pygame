@@ -21,7 +21,6 @@
   pete@shinners.org
 */
 
-
 /*
  *  extended image module for pygame, note this only has
  *  the extended load and save functions, which are autmatically used
@@ -44,7 +43,6 @@
 #ifdef __SYMBIAN32__ /* until PNG support is done for Symbian */
 #include <stdio.h>
 #else
-
 // PNG_SKIP_SETJMP_CHECK : non-regression on #662 (build error on old libpng)
 #define PNG_SKIP_SETJMP_CHECK
 #include <png.h>
@@ -75,62 +73,13 @@ static SDL_mutex *_pg_img_mutex = 0;
 
 #ifdef WIN32
 
-#ifndef Py_WIN8APP
 #include <windows.h>
-#else
 
-
-static struct {
-    int loaded;
-    void *handle;
-    void (*jpeg_calc_output_dimensions)(j_decompress_ptr cinfo);
-    void (*jpeg_CreateDecompress)(j_decompress_ptr cinfo, int version,
-                                  size_t structsize);
-    void (*jpeg_destroy_decompress)(j_decompress_ptr cinfo);
-    boolean (*jpeg_finish_decompress)(j_decompress_ptr cinfo);
-    int (*jpeg_read_header)(j_decompress_ptr cinfo, boolean require_image);
-    JDIMENSION (*jpeg_read_scanlines)
-    (j_decompress_ptr cinfo, JSAMPARRAY scanlines, JDIMENSION max_lines);
-    boolean (*jpeg_resync_to_restart)(j_decompress_ptr cinfo, int desired);
-    boolean (*jpeg_start_decompress)(j_decompress_ptr cinfo);
-    void (*jpeg_CreateCompress)(j_compress_ptr cinfo, int version,
-                                size_t structsize);
-    void (*jpeg_start_compress)(j_compress_ptr cinfo,
-                                boolean write_all_tables);
-    void (*jpeg_set_quality)(j_compress_ptr cinfo, int quality,
-                             boolean force_baseline);
-    void (*jpeg_set_defaults)(j_compress_ptr cinfo);
-    JDIMENSION (*jpeg_write_scanlines)
-    (j_compress_ptr cinfo, JSAMPARRAY scanlines, JDIMENSION num_lines);
-    void (*jpeg_finish_compress)(j_compress_ptr cinfo);
-    void (*jpeg_destroy_compress)(j_compress_ptr cinfo);
-    struct jpeg_error_mgr *(*jpeg_std_error)(struct jpeg_error_mgr *err);
-} lib;
-
-#ifdef LOAD_JPG_DYNAMIC
-#define FUNCTION_LOADER(FUNC, SIG)                       \
-    lib.FUNC = (SIG)SDL_LoadFunction(lib.handle, #FUNC); \
-    if (lib.FUNC == NULL) {                              \
-        SDL_UnloadObject(lib.handle);                    \
-        return -1;                                       \
-    }
-#else
-#define FUNCTION_LOADER(FUNC, SIG) lib.FUNC = FUNC;
-#endif
-
-#endif
-
-#ifdef Py_WIN8APP
-#define pg_RWflush(rwops) (fflush((rwops)->hidden.stdio.fp) ? -1 : 0)
-#else
 #if IS_SDLv1
-#define pg_RWflush(rwops) \
-    (FlushFileBuffers((HANDLE)(rwops)->hidden.win32io.h) ? 0 : -1)
+#define pg_RWflush(rwops) (FlushFileBuffers((HANDLE)(rwops)->hidden.win32io.h) ? 0 : -1)
 #else /* IS_SDLv2 */
-#define pg_RWflush(rwops) \
-    (FlushFileBuffers((HANDLE)(rwops)->hidden.windowsio.h) ? 0 : -1)
+#define pg_RWflush(rwops) (FlushFileBuffers((HANDLE)(rwops)->hidden.windowsio.h) ? 0 : -1)
 #endif /* IS_SDLv2 */
-#endif
 
 #else /* ~WIN32 */
 
@@ -564,7 +513,7 @@ j_empty_output_buffer(j_compress_ptr cinfo)
     dest->pub.next_output_byte = dest->buffer;
     dest->pub.free_in_buffer = OUTPUT_BUF_SIZE;
 
-    return TRUE;
+    return 1;
 }
 
 static void
@@ -579,7 +528,6 @@ j_term_destination(j_compress_ptr cinfo)
             ERREXIT(cinfo, JERR_FILE_WRITE);
         }
     }
-
     if (pg_RWflush(dest->outfile)) {
         ERREXIT(cinfo, JERR_FILE_WRITE);
     }
@@ -625,13 +573,7 @@ write_jpeg(const char *file_name, unsigned char **image_buffer,
     num_lines_to_write = NUM_LINES_TO_WRITE;
 
     cinfo.err = jpeg_std_error(&jerr);
-
-#ifdef Py_WIN8APP
-    lib.jpeg_create_compress(&cinfo);
-#else
     jpeg_create_compress(&cinfo);
-#endif
-    
 
     if (!(outfile = SDL_RWFromFile(file_name, "wb"))) {
         return -1;
@@ -647,18 +589,10 @@ write_jpeg(const char *file_name, unsigned char **image_buffer,
     /* cinfo.optimize_coding = FALSE;
      */
 
-#ifdef Py_WIN8APP
-    lib.jpeg_set_defaults(&cinfo);
-    lib.jpeg_set_quality(&cinfo, quality, TRUE);
-
-    lib.jpeg_start_compress(&cinfo, TRUE);
-#else
     jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, quality, TRUE);
+    jpeg_set_quality(&cinfo, quality, 1);
 
-    jpeg_start_compress(&cinfo, TRUE);
-#endif
-    
+    jpeg_start_compress(&cinfo, 1);
 
     /* try and write many scanlines at once.  */
     while (cinfo.next_scanline < cinfo.image_height) {
@@ -671,29 +605,12 @@ write_jpeg(const char *file_name, unsigned char **image_buffer,
             row_pointer[i] = image_buffer[cinfo.next_scanline + i];
         }
 
-#ifdef Py_WIN8APP
-        lib.jpeg_write_scanlines(&cinfo, row_pointer, num_lines_to_write);
-#else
         jpeg_write_scanlines(&cinfo, row_pointer, num_lines_to_write);
-#endif
-        
     }
 
-#ifdef Py_WIN8APP
-    lib.jpeg_finish_compress(&cinfo);
-#else
     jpeg_finish_compress(&cinfo);
-#endif
-
-    
     SDL_RWclose(outfile);
-
-#ifdef Py_WIN8APP
-    lib.jpeg_destroy_compress(&cinfo);
-#else
     jpeg_destroy_compress(&cinfo);
-#endif
-    
     return 0;
 }
 
@@ -941,6 +858,7 @@ image_save_ext(PyObject *self, PyObject *arg)
     else {
         name = Bytes_AS_STRING(oencoded);
     }
+
     if (result > 0) {
         const char *ext = find_extension(name);
         if (!strcasecmp(ext, "jpeg") || !strcasecmp(ext, "jpg")) {
@@ -951,7 +869,7 @@ image_save_ext(PyObject *self, PyObject *arg)
              */
             if (rw != NULL) {
                 PyErr_SetString(pgExc_SDLError,
-                        "SDL_Image 2.0.2 or newer nedded to save "
+                        "SDL_Image 2.0.2 or newer needed to save "
                         "jpeg to a fileobject.");
                 result = -2;
             }
@@ -1079,57 +997,6 @@ static PyMethodDef _imageext_methods[] = {
 
 MODINIT_DEFINE(imageext)
 {
-
-#ifdef Py_WIN8APP
-    if (lib.loaded == 0) {
-#ifdef LOAD_JPG_DYNAMIC
-        lib.handle = SDL_LoadObject(LOAD_JPG_DYNAMIC);
-        if (lib.handle == NULL) {
-            return -1;
-        }
-#endif
-        FUNCTION_LOADER(jpeg_calc_output_dimensions,
-                        void (*)(j_decompress_ptr cinfo))
-        FUNCTION_LOADER(
-            jpeg_CreateDecompress,
-            void (*)(j_decompress_ptr cinfo, int version, size_t structsize))
-        FUNCTION_LOADER(jpeg_destroy_decompress,
-                        void (*)(j_decompress_ptr cinfo))
-        FUNCTION_LOADER(jpeg_finish_decompress,
-                        boolean(*)(j_decompress_ptr cinfo))
-        FUNCTION_LOADER(jpeg_read_header,
-                        int (*)(j_decompress_ptr cinfo, boolean require_image))
-        FUNCTION_LOADER(
-            jpeg_read_scanlines,
-            JDIMENSION(*)(j_decompress_ptr cinfo, JSAMPARRAY scanlines,
-                          JDIMENSION max_lines))
-        FUNCTION_LOADER(jpeg_resync_to_restart,
-                        boolean(*)(j_decompress_ptr cinfo, int desired))
-        FUNCTION_LOADER(jpeg_start_decompress,
-                        boolean(*)(j_decompress_ptr cinfo))
-            // no jpeg writing support :(
-        /*FUNCTION_LOADER(
-            jpeg_CreateCompress,
-            void (*)(j_compress_ptr cinfo, int version, size_t structsize))
-        FUNCTION_LOADER(
-            jpeg_start_compress,
-            void (*)(j_compress_ptr cinfo, boolean write_all_tables))
-        FUNCTION_LOADER(jpeg_set_quality,
-                        void (*)(j_compress_ptr cinfo, int quality,
-                                 boolean force_baseline))
-        FUNCTION_LOADER(jpeg_set_defaults, void (*)(j_compress_ptr cinfo))
-        FUNCTION_LOADER(
-            jpeg_write_scanlines,
-            JDIMENSION(*)(j_compress_ptr cinfo, JSAMPARRAY scanlines,
-                          JDIMENSION num_lines))
-        FUNCTION_LOADER(jpeg_finish_compress, void (*)(j_compress_ptr cinfo))
-        FUNCTION_LOADER(jpeg_destroy_compress, void (*)(j_compress_ptr cinfo))*/
-        FUNCTION_LOADER(jpeg_std_error, struct jpeg_error_mgr *
-                                            (*)(struct jpeg_error_mgr * err))
-    }
-    ++lib.loaded;
-#endif
-
 #if PY3
     static struct PyModuleDef _module = {PyModuleDef_HEAD_INIT,
                                          "imageext",
