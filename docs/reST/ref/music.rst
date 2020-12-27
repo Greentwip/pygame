@@ -86,7 +86,8 @@ can crash the program, ``e.g``. Debian Linux. Consider using ``OGG`` instead.
    | :sg:`stop() -> None`
 
    Stops the music playback if it is currently playing.
-   It Won't Unload the music.
+   endevent will be triggered, if set.
+   It won't unload the music.
 
    .. ## pygame.mixer.music.stop ##
 
@@ -154,7 +155,11 @@ can crash the program, ``e.g``. Debian Linux. Consider using ``OGG`` instead.
    | :sg:`get_busy() -> bool`
 
    Returns True when the music stream is actively playing. When the music is
-   idle this returns False. It returns True even if the music is paused.
+   idle this returns False. In pygame 2.0.1 and above this function returns
+   False when the music is paused. In pygame 1 it returns True when the music
+   is paused.
+
+   .. versionchanged:: 2.0.1 Returns False when music paused.
 
    .. ## pygame.mixer.music.get_busy ##
 

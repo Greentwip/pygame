@@ -48,9 +48,9 @@ copyright = u'2000-2020, pygame developers'
 # built documents.
 #
 # The short X.Y version.
-version = '2.0.1.dev1'
+version = '2.0.2'
 # The full version, including alpha/beta/rc tags.
-release = '2.0.1.dev1'
+release = '2.0.2.dev1'
 
 # Format strings for the version directives
 versionadded_format = 'New in pygame %s'
@@ -223,5 +223,4 @@ headers_filename_sfx = '_doc'
 smartquotes = False
 
 edit_on_github_project = 'pygame/pygame'
-edit_on_github_branch = 'master'
-
+edit_on_github_branch = 'main'
