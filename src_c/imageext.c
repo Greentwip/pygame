@@ -43,6 +43,7 @@
 #ifdef __SYMBIAN32__ /* until PNG support is done for Symbian */
 #include <stdio.h>
 #else
+
 // PNG_SKIP_SETJMP_CHECK : non-regression on #662 (build error on old libpng)
 #define PNG_SKIP_SETJMP_CHECK
 #include <png.h>
@@ -73,13 +74,61 @@ static SDL_mutex *_pg_img_mutex = 0;
 
 #ifdef WIN32
 
+#ifndef Py_WIN8APP
 #include <windows.h>
+#else
 
+static struct {
+    int loaded;
+    void *handle;
+    void (*jpeg_calc_output_dimensions)(j_decompress_ptr cinfo);
+    void (*jpeg_CreateDecompress)(j_decompress_ptr cinfo, int version,
+                                  size_t structsize);
+    void (*jpeg_destroy_decompress)(j_decompress_ptr cinfo);
+    boolean (*jpeg_finish_decompress)(j_decompress_ptr cinfo);
+    int (*jpeg_read_header)(j_decompress_ptr cinfo, boolean require_image);
+    JDIMENSION(*jpeg_read_scanlines)
+    (j_decompress_ptr cinfo, JSAMPARRAY scanlines, JDIMENSION max_lines);
+    boolean (*jpeg_resync_to_restart)(j_decompress_ptr cinfo, int desired);
+    boolean (*jpeg_start_decompress)(j_decompress_ptr cinfo);
+    void (*jpeg_CreateCompress)(j_compress_ptr cinfo, int version,
+                                size_t structsize);
+    void (*jpeg_start_compress)(j_compress_ptr cinfo,
+                                boolean write_all_tables);
+    void (*jpeg_set_quality)(j_compress_ptr cinfo, int quality,
+                             boolean force_baseline);
+    void (*jpeg_set_defaults)(j_compress_ptr cinfo);
+    JDIMENSION(*jpeg_write_scanlines)
+    (j_compress_ptr cinfo, JSAMPARRAY scanlines, JDIMENSION num_lines);
+    void (*jpeg_finish_compress)(j_compress_ptr cinfo);
+    void (*jpeg_destroy_compress)(j_compress_ptr cinfo);
+    struct jpeg_error_mgr *(*jpeg_std_error)(struct jpeg_error_mgr *err);
+} lib;
+
+#ifdef LOAD_JPG_DYNAMIC
+#define FUNCTION_LOADER(FUNC, SIG)                       \
+    lib.FUNC = (SIG)SDL_LoadFunction(lib.handle, #FUNC); \
+    if (lib.FUNC == NULL) {                              \
+        SDL_UnloadObject(lib.handle);                    \
+        return -1;                                       \
+    }
+#else
+#define FUNCTION_LOADER(FUNC, SIG) lib.FUNC = FUNC;
+#endif
+
+#endif
+
+#ifdef Py_WIN8APP
+#define pg_RWflush(rwops) (fflush((rwops)->hidden.stdio.fp) ? -1 : 0)
+#else
 #if IS_SDLv1
-#define pg_RWflush(rwops) (FlushFileBuffers((HANDLE)(rwops)->hidden.win32io.h) ? 0 : -1)
+#define pg_RWflush(rwops) \
+    (FlushFileBuffers((HANDLE)(rwops)->hidden.win32io.h) ? 0 : -1)
 #else /* IS_SDLv2 */
-#define pg_RWflush(rwops) (FlushFileBuffers((HANDLE)(rwops)->hidden.windowsio.h) ? 0 : -1)
+#define pg_RWflush(rwops) \
+    (FlushFileBuffers((HANDLE)(rwops)->hidden.windowsio.h) ? 0 : -1)
 #endif /* IS_SDLv2 */
+#endif
 
 #else /* ~WIN32 */
 
@@ -131,7 +180,8 @@ image_load_ext(PyObject *self, PyObject *arg)
         namelen = Bytes_GET_SIZE(oencoded);
         Py_BEGIN_ALLOW_THREADS;
         if (namelen > 4 && !strcasecmp(name + namelen - 4, ".gif")) {
-            /* using multiple threads does not work for (at least) SDL_image <= 2.0.4 */
+            /* using multiple threads does not work for (at least) SDL_image
+             * <= 2.0.4 */
             SDL_LockMutex(_pg_img_mutex);
             surf = IMG_Load(name);
             SDL_UnlockMutex(_pg_img_mutex);
@@ -140,7 +190,7 @@ image_load_ext(PyObject *self, PyObject *arg)
             surf = IMG_Load(name);
         }
         Py_END_ALLOW_THREADS;
-#else /* ~WITH_THREAD */
+#else  /* ~WITH_THREAD */
         surf = IMG_Load(name);
 #endif /* WITH_THREAD */
         Py_DECREF(oencoded);
@@ -200,7 +250,8 @@ image_load_ext(PyObject *self, PyObject *arg)
 #ifdef WITH_THREAD
         Py_BEGIN_ALLOW_THREADS;
         if (lock_mutex) {
-            /* using multiple threads does not work for (at least) SDL_image <= 2.0.4 */
+            /* using multiple threads does not work for (at least) SDL_image
+             * <= 2.0.4 */
             SDL_LockMutex(_pg_img_mutex);
             surf = IMG_LoadTyped_RW(rw, 1, ext);
             SDL_UnlockMutex(_pg_img_mutex);
@@ -209,23 +260,24 @@ image_load_ext(PyObject *self, PyObject *arg)
             surf = IMG_LoadTyped_RW(rw, 1, ext);
         }
         Py_END_ALLOW_THREADS;
-#else /* ~WITH_THREAD */
+#else  /* ~WITH_THREAD */
         surf = IMG_LoadTyped_RW(rw, 1, ext);
 #endif /* ~WITH_THREAD */
         PyMem_Free(ext);
     }
 
-    if (surf == NULL){
-        if (!strncmp(IMG_GetError(), "Couldn't open", 12)){
+    if (surf == NULL) {
+        if (!strncmp(IMG_GetError(), "Couldn't open", 12)) {
             SDL_ClearError();
 #if PY3
-            PyErr_SetString(PyExc_FileNotFoundError, "No such file or directory.");
+            PyErr_SetString(PyExc_FileNotFoundError,
+                            "No such file or directory.");
 #else
             PyErr_SetString(PyExc_IOError, "No such file or directory.");
 #endif
             return NULL;
         }
-        else{
+        else {
             return RAISE(pgExc_SDLError, IMG_GetError());
         }
     }
@@ -244,7 +296,8 @@ png_write_fn(png_structp png_ptr, png_bytep data, png_size_t length)
     SDL_RWops *rwops = (SDL_RWops *)png_get_io_ptr(png_ptr);
     if (SDL_RWwrite(rwops, data, 1, length) != length) {
         SDL_RWclose(rwops);
-        png_error(png_ptr, "Error while writing to the PNG file (SDL_RWwrite)");
+        png_error(png_ptr,
+                  "Error while writing to the PNG file (SDL_RWwrite)");
     }
 }
 
@@ -411,7 +464,7 @@ SavePNG(SDL_Surface *surface, const char *file, SDL_RWops *rw)
         SDL_SetAlpha(surface, 0, 255);
     if (surf_flags & SDL_SRCCOLORKEY)
         SDL_SetColorKey(surface, 0, surface->format->colorkey);
-#else /* IS_SDLv2 */
+#else  /* IS_SDLv2 */
     SDL_GetSurfaceAlphaMod(surface, &surf_alpha);
     SDL_SetSurfaceAlphaMod(surface, 255);
     SDL_GetSurfaceBlendMode(surface, &surf_mode);
@@ -483,8 +536,8 @@ SavePNG(SDL_Surface *surface, const char *file, SDL_RWops *rw)
 typedef struct {
     struct jpeg_destination_mgr pub; /* public fields */
 
-    SDL_RWops *outfile;  /* target stream */
-    JOCTET *buffer; /* start of buffer */
+    SDL_RWops *outfile; /* target stream */
+    JOCTET *buffer;     /* start of buffer */
 } j_outfile_mgr;
 
 static void
@@ -513,7 +566,7 @@ j_empty_output_buffer(j_compress_ptr cinfo)
     dest->pub.next_output_byte = dest->buffer;
     dest->pub.free_in_buffer = OUTPUT_BUF_SIZE;
 
-    return 1;
+    return TRUE;
 }
 
 static void
@@ -524,10 +577,12 @@ j_term_destination(j_compress_ptr cinfo)
 
     /* Write any data remaining in the buffer */
     if (datacount > 0) {
-        if (SDL_RWwrite(dest->outfile, dest->buffer, 1, datacount) != datacount) {
+        if (SDL_RWwrite(dest->outfile, dest->buffer, 1, datacount) !=
+            datacount) {
             ERREXIT(cinfo, JERR_FILE_WRITE);
         }
     }
+
     if (pg_RWflush(dest->outfile)) {
         ERREXIT(cinfo, JERR_FILE_WRITE);
     }
@@ -573,7 +628,12 @@ write_jpeg(const char *file_name, unsigned char **image_buffer,
     num_lines_to_write = NUM_LINES_TO_WRITE;
 
     cinfo.err = jpeg_std_error(&jerr);
+
+#ifdef Py_WIN8APP
+    lib.jpeg_create_compress(&cinfo);
+#else
     jpeg_create_compress(&cinfo);
+#endif
 
     if (!(outfile = SDL_RWFromFile(file_name, "wb"))) {
         return -1;
@@ -589,10 +649,17 @@ write_jpeg(const char *file_name, unsigned char **image_buffer,
     /* cinfo.optimize_coding = FALSE;
      */
 
-    jpeg_set_defaults(&cinfo);
-    jpeg_set_quality(&cinfo, quality, 1);
+#ifdef Py_WIN8APP
+    lib.jpeg_set_defaults(&cinfo);
+    lib.jpeg_set_quality(&cinfo, quality, TRUE);
 
-    jpeg_start_compress(&cinfo, 1);
+    lib.jpeg_start_compress(&cinfo, TRUE);
+#else
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, quality, TRUE);
+
+    jpeg_start_compress(&cinfo, TRUE);
+#endif
 
     /* try and write many scanlines at once.  */
     while (cinfo.next_scanline < cinfo.image_height) {
@@ -605,12 +672,27 @@ write_jpeg(const char *file_name, unsigned char **image_buffer,
             row_pointer[i] = image_buffer[cinfo.next_scanline + i];
         }
 
+#ifdef Py_WIN8APP
+        lib.jpeg_write_scanlines(&cinfo, row_pointer, num_lines_to_write);
+#else
         jpeg_write_scanlines(&cinfo, row_pointer, num_lines_to_write);
+#endif
     }
 
+#ifdef Py_WIN8APP
+    lib.jpeg_finish_compress(&cinfo);
+#else
     jpeg_finish_compress(&cinfo);
+#endif
+
     SDL_RWclose(outfile);
+
+#ifdef Py_WIN8APP
+    lib.jpeg_destroy_compress(&cinfo);
+#else
     jpeg_destroy_compress(&cinfo);
+#endif
+
     return 0;
 }
 
@@ -761,15 +843,13 @@ opengltosdl(void)
     if (!p_glReadPixels) {
         return (SDL_Surface *)RAISE(PyExc_RuntimeError,
                                     "Cannot find glReadPixels function.");
-
     }
 
     pixels = (unsigned char *)malloc(surf->w * surf->h * 3);
 
     if (!pixels) {
         return (SDL_Surface *)RAISE(
-                                  PyExc_MemoryError,
-                                  "Cannot allocate enough memory for pixels.");
+            PyExc_MemoryError, "Cannot allocate enough memory for pixels.");
     }
 
     /* GL_RGB, GL_UNSIGNED_BYTE */
@@ -818,8 +898,8 @@ image_save_ext(PyObject *self, PyObject *arg)
     SDL_Surface *temp = NULL;
 #endif /* IS_SDLv1 */
 
-    if (!PyArg_ParseTuple(arg, "O!O|s", &pgSurface_Type, &surfobj,
-                &obj, &namehint)) {
+    if (!PyArg_ParseTuple(arg, "O!O|s", &pgSurface_Type, &surfobj, &obj,
+                          &namehint)) {
         return NULL;
     }
 
@@ -858,35 +938,35 @@ image_save_ext(PyObject *self, PyObject *arg)
     else {
         name = Bytes_AS_STRING(oencoded);
     }
-
     if (result > 0) {
         const char *ext = find_extension(name);
         if (!strcasecmp(ext, "jpeg") || !strcasecmp(ext, "jpg")) {
 #if (SDL_IMAGE_MAJOR_VERSION * 1000 + SDL_IMAGE_MINOR_VERSION * 100 + \
-        SDL_IMAGE_PATCHLEVEL) < 2002
+     SDL_IMAGE_PATCHLEVEL) < 2002
             /* SDL_Image is a version less than 2.0.2 and therefore does not
              * have the functions IMG_SaveJPG() and IMG_SaveJPG_RW().
              */
             if (rw != NULL) {
                 PyErr_SetString(pgExc_SDLError,
-                        "SDL_Image 2.0.2 or newer needed to save "
-                        "jpeg to a fileobject.");
+                                "SDL_Image 2.0.2 or newer nedded to save "
+                                "jpeg to a fileobject.");
                 result = -2;
             }
             else {
 #ifdef JPEGLIB_H
-            /* jpg save functions seem *NOT* thread safe at least on windows.
-             */
-            /*
-            Py_BEGIN_ALLOW_THREADS;
-            */
+                /* jpg save functions seem *NOT* thread safe at least on
+                 * windows.
+                 */
+                /*
+                Py_BEGIN_ALLOW_THREADS;
+                */
                 result = SaveJPEG(surf, name);
-            /*
-            Py_END_ALLOW_THREADS;
-            */
+                /*
+                Py_END_ALLOW_THREADS;
+                */
 #else
-                PyErr_SetString(
-                        pgExc_SDLError, "No support for jpg compiled in.");
+                PyErr_SetString(pgExc_SDLError,
+                                "No support for jpg compiled in.");
                 result = -2;
 #endif /* ~JPEGLIB_H */
             }
@@ -905,8 +985,8 @@ image_save_ext(PyObject *self, PyObject *arg)
                  * try calling the pygame SaveJPEG function.
                  */
                 if (result == -1) {
-                    if (strstr(SDL_GetError(),
-                                "not built with jpeglib") != NULL) {
+                    if (strstr(SDL_GetError(), "not built with jpeglib") !=
+                        NULL) {
                         SDL_ClearError();
                         result = SaveJPEG(surf, name);
                     }
@@ -921,8 +1001,7 @@ image_save_ext(PyObject *self, PyObject *arg)
             result = SavePNG(surf, name, rw);
             /*Py_END_ALLOW_THREADS; */
 #else
-            PyErr_SetString(
-                    pgExc_SDLError, "No support for png compiled in.");
+            PyErr_SetString(pgExc_SDLError, "No support for png compiled in.");
             result = -2;
 #endif /* ~PNG_H */
         }
@@ -955,11 +1034,11 @@ image_save_ext(PyObject *self, PyObject *arg)
     Py_RETURN_NONE;
 }
 
-static PyObject*
+static PyObject *
 image_get_sdl_image_version(PyObject *self, PyObject *arg)
 {
     return Py_BuildValue("iii", SDL_IMAGE_MAJOR_VERSION,
-            SDL_IMAGE_MINOR_VERSION, SDL_IMAGE_PATCHLEVEL);
+                         SDL_IMAGE_MINOR_VERSION, SDL_IMAGE_PATCHLEVEL);
 }
 
 #ifdef WITH_THREAD
@@ -972,7 +1051,7 @@ _imageext_free(void *ptr)
         _pg_img_mutex = 0;
     }
 }
-#else /* PY2 */
+#else  /* PY2 */
 static void
 _imageext_free(void)
 {
@@ -988,8 +1067,8 @@ static PyMethodDef _imageext_methods[] = {
     {"load_extended", image_load_ext, METH_VARARGS, DOC_PYGAMEIMAGE},
     {"save_extended", image_save_ext, METH_VARARGS, DOC_PYGAMEIMAGE},
     {"_get_sdl_image_version", image_get_sdl_image_version, METH_NOARGS,
-        "_get_sdl_image_version() -> (major, minor, patch)\n"
-            "Note: Should not be used directly."},
+     "_get_sdl_image_version() -> (major, minor, patch)\n"
+     "Note: Should not be used directly."},
     {NULL, NULL, 0, NULL}};
 
 /*DOC*/ static char _imageext_doc[] =
@@ -997,18 +1076,64 @@ static PyMethodDef _imageext_methods[] = {
 
 MODINIT_DEFINE(imageext)
 {
+#ifdef Py_WIN8APP
+    if (lib.loaded == 0) {
+#ifdef LOAD_JPG_DYNAMIC
+        lib.handle = SDL_LoadObject(LOAD_JPG_DYNAMIC);
+        if (lib.handle == NULL) {
+            return -1;
+        }
+#endif
+        FUNCTION_LOADER(jpeg_calc_output_dimensions,
+                        void (*)(j_decompress_ptr cinfo))
+        FUNCTION_LOADER(
+            jpeg_CreateDecompress,
+            void (*)(j_decompress_ptr cinfo, int version, size_t structsize))
+        FUNCTION_LOADER(jpeg_destroy_decompress,
+                        void (*)(j_decompress_ptr cinfo))
+        FUNCTION_LOADER(jpeg_finish_decompress,
+                        boolean(*)(j_decompress_ptr cinfo))
+        FUNCTION_LOADER(jpeg_read_header,
+                        int (*)(j_decompress_ptr cinfo, boolean require_image))
+        FUNCTION_LOADER(
+            jpeg_read_scanlines,
+            JDIMENSION(*)(j_decompress_ptr cinfo, JSAMPARRAY scanlines,
+                          JDIMENSION max_lines))
+        FUNCTION_LOADER(jpeg_resync_to_restart,
+                        boolean(*)(j_decompress_ptr cinfo, int desired))
+        FUNCTION_LOADER(jpeg_start_decompress,
+                        boolean(*)(j_decompress_ptr cinfo))
+        // no jpeg writing support :(
+        /*FUNCTION_LOADER(
+            jpeg_CreateCompress,
+            void (*)(j_compress_ptr cinfo, int version, size_t structsize))
+        FUNCTION_LOADER(
+            jpeg_start_compress,
+            void (*)(j_compress_ptr cinfo, boolean write_all_tables))
+        FUNCTION_LOADER(jpeg_set_quality,
+                        void (*)(j_compress_ptr cinfo, int quality,
+                                 boolean force_baseline))
+        FUNCTION_LOADER(jpeg_set_defaults, void (*)(j_compress_ptr cinfo))
+        FUNCTION_LOADER(
+            jpeg_write_scanlines,
+            JDIMENSION(*)(j_compress_ptr cinfo, JSAMPARRAY scanlines,
+                          JDIMENSION num_lines))
+        FUNCTION_LOADER(jpeg_finish_compress, void (*)(j_compress_ptr cinfo))
+        FUNCTION_LOADER(jpeg_destroy_compress, void (*)(j_compress_ptr
+        cinfo))*/
+        FUNCTION_LOADER(jpeg_std_error, struct jpeg_error_mgr *
+                                            (*)(struct jpeg_error_mgr * err))
+    }
+    ++lib.loaded;
+#endif
+
 #if PY3
-    static struct PyModuleDef _module = {PyModuleDef_HEAD_INIT,
-                                         "imageext",
-                                         _imageext_doc,
-                                         -1,
-                                         _imageext_methods,
-                                         NULL,
-                                         NULL,
-                                         NULL,
+    static struct PyModuleDef _module = {
+        PyModuleDef_HEAD_INIT, "imageext", _imageext_doc, -1,
+        _imageext_methods,     NULL,       NULL,          NULL,
 #ifdef WITH_THREAD
-                                         _imageext_free};
-#else /* ~WITH_THREAD */
+        _imageext_free};
+#else  /* ~WITH_THREAD */
                                          0};
 #endif /* ~WITH_THREAD */
 #endif
